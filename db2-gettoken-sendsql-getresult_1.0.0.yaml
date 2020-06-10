@@ -1,0 +1,489 @@
+swagger: '2.0'
+info:
+  title: DB2-GetToke-SendSQL-GetResult
+  x-ibm-name: db2-gettoke-sendsql-getresult
+  version: 1.0.0
+  description: For test/demo/learning
+schemes:
+  - http
+  - https
+basePath: /db2-get-test-2
+produces:
+  - application/json
+consumes:
+  - application/json
+security:
+  - clientID: []
+securityDefinitions:
+  clientID:
+    type: apiKey
+    in: header
+    name: X-IBM-Client-Id
+x-ibm-configuration:
+  cors:
+    enabled: true
+  gateway: datapower-api-gateway
+  type: rest
+  phase: realized
+  enforced: true
+  testable: true
+  assembly:
+    execute:
+      - gatewayscript:
+          version: 2.0.0
+          title: Handle request
+          source: |+
+            //Programmer: FanebostL
+            var apim = require('apim');
+            apim.output('application/text');
+
+            var uidpw = apim.getvariable('request.parameters.uidpw');
+            var sqlstmt = apim.getvariable('request.parameters.sqlstmt');
+
+            var system = require('system-metadata');
+
+            try {
+                //Define a global variable for the sqlstmt
+                system.ContextName.sqlstmt = sqlstmt;
+                apim.setvariable("message.body", uidpw );
+            }
+            catch(err) {
+                throw new Error("Something went bad, your JavaScript is wrong (in script handle request). ---->" + err.toString());
+            } 
+
+
+
+      - invoke:
+          title: Get token
+          version: 2.0.0
+          verb: keep
+          target-url: >-
+            https://dashdb-txn-flex-yp-fra02-386.services.eu-de.bluemix.net/dbapi/v4/auth/tokens
+          follow-redirects: false
+          timeout: 60
+          parameter-control:
+            type: blacklist
+          header-control:
+            type: blacklist
+            values:
+              - ^X-.*$
+              - ^Referer$
+              - ^Apim-debug$
+              - ^Transfer.*$
+              - ^Accept-lang.*$
+              - ^Origin.*$
+          inject-proxy-headers: true
+          stop-on-error:
+            - ConnectionError
+      - gatewayscript:
+          version: 2.0.0
+          title: send-sql
+          source: >
+            // Programmer: FanebostL
+
+
+            var apim = require('apim');
+
+            apim.output('application/text'); 
+
+            var urlopen = require('urlopen');
+
+
+            // Get the sqlstmt
+
+            var system = require('system-metadata');
+
+            var sqlstmt =
+            system.getVariable('var://system/ContextName/sqlstmt');
+
+
+            var peylast = apim.getvariable('message.body');
+
+            var myJSON = JSON.stringify(peylast);
+
+
+            // Parsing out the token
+
+            const obj = JSON.parse(peylast);
+
+            var mytoken = "Bearer " + obj.token;
+
+
+            var system = require('system-metadata');
+
+            system.ContextName.mytoken = mytoken;
+
+
+            var ua_options = {    
+                'persistentConnection': false,
+                'allowCompression': true,
+                'followRedirect': false,
+                'maxRedirects': 16,
+                'http10Only': true,
+                'rewriteHost': false
+            };
+
+            var httpUserAgent = new urlopen.HttpUserAgent(ua_options);
+
+
+            let DefaultTLSProfile = 'tls-client-profile-catalog-default';
+
+
+            var options = {
+                target: 'https://dashdb-txn-flex-yp-fra02-386.services.eu-de.bluemix.net:8443/dbapi/v4/sql_jobs',    
+                method: 'post',                        
+                sslClientProfile: DefaultTLSProfile,
+                headers: {"Authorization": mytoken, "Accept": 'application/json'},
+                data: {"commands":sqlstmt,"limit":100,"separator":";","stop_on_error":"yes"} 
+            };
+
+
+            urlopen.open(options, function(error, response){
+                if (error){
+                    apim.setvariable('message.body', '{"message" : "err"}');
+                }
+                else{
+                    response.readAsBuffer(function(error, responseData){
+                        if (error){
+                            throw error ;
+                        } else {
+                            apim.setvariable('message.body', responseData);
+                        }
+                    });
+                }
+            });
+      - gatewayscript:
+          version: 2.0.0
+          title: get result
+          source: >+
+            // Programmer: FanebostL
+
+            function sleep(ms) {
+              return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+
+            async function waitalittle() {
+              await sleep(15000);
+
+              // Sleep in loop
+              for (let i = 0; i < 5; i++) {
+                if (i === 3)
+                  await sleep(4000);
+                console.log(i);
+              }
+            }
+
+
+            function getresult(error, response){
+                if (error){
+                    apim.setvariable('message.body', '{"message" : "err"}');
+                }
+                else{
+                    response.readAsBuffer(function(error,  responseData){
+                        if (error){
+                            throw error ;
+                        } 
+                        
+                        const obj = JSON.parse(responseData);
+                        
+                        if (obj.status=="running") {   
+                            system.ContextName.tempdata = "running";
+                            console.alert("DB is busy processing SQL. Pausing 15 seconds before continuing.......");
+                            waitalittle();
+                        }
+                        
+                        if (obj.status=="completed") {
+                            //Define a global variable for the token
+                            system.ContextName.tempdata = responseData.toString();
+                        }
+                    });
+                }
+            }
+
+
+            var apim = require('apim');
+
+            apim.output('application/text');
+
+            var urlopen = require('urlopen');
+
+
+            var system = require('system-metadata');
+
+            var tokenet =
+            system.getVariable('var://system/ContextName/mytoken');
+
+
+            var peylast = apim.getvariable('message.body');
+
+            var myJSON = JSON.stringify(peylast);
+
+
+            // Parsing out the token
+
+            const obj = JSON.parse(peylast);
+
+            var myid = obj.id;
+
+
+            var ua_options = {    
+                'persistentConnection': false,
+                'allowCompression': true,
+                'followRedirect': false,
+                'maxRedirects': 16,
+                'http10Only': true,
+                'rewriteHost': false 
+            };
+
+            var httpUserAgent = new urlopen.HttpUserAgent(ua_options);
+
+
+            let DefaultTLSProfile = 'tls-client-profile-catalog-default';
+
+            var options = {
+                target: 'https://dashdb-txn-flex-yp-fra02-386.services.eu-de.bluemix.net:8443/dbapi/v4/sql_jobs/' + myid,    
+                method: 'get',                       
+                sslClientProfile: DefaultTLSProfile,
+                headers: {"Authorization": tokenet, "Accept": 'application/json'}
+            };
+
+                urlopen.open(options, function (error, response) {getresult(error,response)});
+
+
+      - gatewayscript:
+          version: 2.0.0
+          title: retry get result if needed
+          source: >+
+            // Programmer: FanebostL
+
+            function sleep(ms) {
+              return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+
+            async function waitalittle() {
+              await sleep(15000);
+
+              // Sleep in loop
+              for (let i = 0; i < 5; i++) {
+                if (i === 3)
+                  await sleep(4000);
+                console.log(i);
+              }
+            }
+
+
+            function getresult(error, response){
+                if (error){
+                    apim.setvariable('message.body', '{"message" : "err"}'); 
+                }
+                else{
+                    response.readAsBuffer(function(error, responseData){
+                        if (error){
+                            throw error ;
+                        } 
+                        
+                        const obj = JSON.parse(responseData);
+                        
+                        if (obj.status=="running") { 
+                            apim.setvariable('message.body', "Your request is still in status " + obj.status + " in the database. Please get the result later using the same token, and this id: " + myid);
+                            waitalittle();
+                        }
+                        
+                        if (obj.status=="completed") {
+                            console.alert("Data received from DB. Data being returned to client");
+                            apim.setvariable('message.body', responseData);
+                        }
+                    });
+                }
+            }
+
+            var apim = require('apim');
+
+            apim.output('application/text');
+
+            var urlopen = require('urlopen');
+
+
+            var system = require('system-metadata');
+
+            var result =
+            system.getVariable('var://system/ContextName/tempdata');
+
+
+            var myid = "";
+
+            var str2 = "running";
+
+            var n = result.localeCompare(str2);
+
+
+            if(n!=0){
+                console.alert("Data received from DB. No second attempt to get the data was needed. Data being returned to client.");
+                apim.setvariable('message.body',result);
+            }
+
+            else {
+                console.alert("Doing a second attempt to get data.");
+                var tokenet = system.getVariable('var://system/ContextName/mytoken');
+
+                //console.alert("TOKENET: " + tokenet);
+
+                var peylast = apim.getvariable('message.body');
+                var myJSON = JSON.stringify(peylast);
+
+                // Parsing out the token
+                const obj = JSON.parse(peylast);
+                myid = obj.id;
+
+                var ua_options = {    
+                    'persistentConnection': false,
+                    'allowCompression': true,
+                    'followRedirect': false,
+                    'maxRedirects': 16,
+                    'http10Only': true,
+                    'rewriteHost': false 
+                };
+                var httpUserAgent = new urlopen.HttpUserAgent(ua_options);
+
+                let DefaultTLSProfile = 'tls-client-profile-catalog-default';
+
+                var options = {
+                    target: 'https://dashdb-txn-flex-yp-fra02-386.services.eu-de.bluemix.net:8443/dbapi/v4/sql_jobs/' + myid,    
+                    method: 'get',                       
+                    sslClientProfile: DefaultTLSProfile,
+                    headers: {"Authorization": tokenet, "Accept": 'application/json'}
+                };
+
+                    urlopen.open(options, function (error, response) {getresult(error,response)});
+            } // end else
+
+    catch:
+      - errors:
+          - JavaScriptError
+        execute:
+          - set-variable:
+              version: 2.0.0
+              title: Javascript Error
+              actions:
+                - set: message.status.code
+                  value: 200
+                  type: number
+                - set: message.status.reason
+                  value: >-
+                    An error occured when executing a javascript on the gateway
+                    server. Contact support.
+                  type: string
+      - errors:
+          - RuntimeError
+          - OperationError
+        execute:
+          - set-variable:
+              version: 2.0.0
+              title: Runtime or Operations Error
+              actions:
+                - set: message.status.code
+                  value: 400
+                  type: number
+                - set: message.status.reason
+                  value: A operations or runtime error has occord. Contact support.
+                  type: string
+      - errors:
+          - ConnectionError
+        execute:
+          - set-variable:
+              version: 2.0.0
+              title: Connection Error
+              actions:
+                - set: message.status.code
+                  value: 400
+                  type: number
+                - set: message.status.reason
+                  value: A connection to back-end error has occured. Contact support.
+                  type: string
+  properties:
+    target-url:
+      value: 'http://example.com/operation-name'
+      description: The URL of the target service
+      encoded: false
+  activity-log:
+    enabled: true
+    error-content: header
+    success-content: activity
+  application-authentication:
+    certificate: false
+paths:
+  /:
+    get:
+      responses:
+        '200':
+          description: success
+          schema:
+            type: string
+      consumes:
+        - application/json
+      produces:
+        - application/json
+    put:
+      responses:
+        '200':
+          description: success
+          schema:
+            type: string
+      consumes: []
+      produces: []
+    post:
+      responses:
+        '200':
+          description: success
+          schema:
+            type: string
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      operationId: token.get2
+      parameters:
+        - name: uidpw
+          in: query
+          required: true
+          type: string
+        - name: sqlstmt
+          in: query
+          required: true
+          type: string
+    delete:
+      responses:
+        '200':
+          description: success
+          schema:
+            type: string
+      consumes: []
+      produces: []
+    options:
+      responses:
+        '200':
+          description: success
+          schema:
+            type: string
+      consumes:
+        - application/json
+      produces:
+        - application/json
+    head:
+      responses:
+        '200':
+          description: success
+          schema:
+            type: string
+      consumes: []
+      produces: []
+    patch:
+      responses:
+        '200':
+          description: success
+          schema:
+            type: string
+      consumes: []
+      produces: []
